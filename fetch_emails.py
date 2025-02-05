@@ -4,6 +4,7 @@ from googleapiclient.discovery import build
 from gmail_auth import authenticate_gmail
 
 def get_email_body(payload):
+    """Extracts the HTML version of the email."""
     html_body = ""
     if 'parts' in payload:
         for part in payload['parts']:
@@ -12,6 +13,7 @@ def get_email_body(payload):
     return html_body.strip()
 
 def extract_product_details(email_html):
+    """Extracts product names and images from the HTML."""
     if not email_html:
         return []
 
@@ -20,22 +22,27 @@ def extract_product_details(email_html):
     order_items = []
     seen_items = set()
 
-    for offer in soup.find_all("div", itemprop="acceptedOffer"):
-        name_tag = offer.find("meta", itemprop="name")
-        img_tag = offer.find("link", itemprop="image")
-        price_tag = offer.find("meta", itemprop="price")
+    product_blocks = soup.find_all("tr")  # Find all table rows containing products
 
-        name = name_tag["content"] if name_tag else "Неизвестный товар"
-        img_url = img_tag["href"] if img_tag else None
-        price = price_tag["content"] if price_tag else "Нет данных"
+    for block in product_blocks:
+        name_tag = block.find("a", style=lambda value: value and "text-decoration:none" in value)
+        img_tag = block.find("img")
+
+        name = name_tag.get_text(strip=True) if name_tag else None
+        img_url = img_tag["src"] if img_tag and "src" in img_tag.attrs else None
+
+        # Filter out irrelevant images (logos, Mastercard, etc.)
+        if img_url and ("asoslogo" in img_url or "content/images" in img_url or "mastercard" in img_url):
+            continue
 
         if name and img_url and (name, img_url) not in seen_items:
-            order_items.append({"name": name, "image": img_url, "price": price})
+            order_items.append({"name": name, "image": img_url})
             seen_items.add((name, img_url))
 
     return order_items
 
 def fetch_asos_orders():
+    """Fetches orders from ASOS."""
     creds = authenticate_gmail()
     service = build('gmail', 'v1', credentials=creds)
 
@@ -45,7 +52,7 @@ def fetch_asos_orders():
     messages = results.get('messages', [])
 
     if not messages:
-        print("❌ Заказы ASOS не найдены.")
+        print("❌ No ASOS orders found.")
         return
     
     for msg in messages:
@@ -58,13 +65,13 @@ def fetch_asos_orders():
             order_items = extract_product_details(email_html)
 
             if order_items:
-                print(f"\n📩 Найдено в письме ID: {msg_id}")
+                print(f"\n📩 Found in email ID: {msg_id}")
                 for item in order_items:
-                    print(f"- {item['name']} | {item['price']}")
+                    print(f"- {item['name']}")
                     print(f"  🖼 {item['image']}")
 
         except Exception as e:
-            print(f"❌ Ошибка обработки письма {msg_id}: {e}")
+            print(f"❌ Error processing email {msg_id}: {e}")
 
 if __name__ == "__main__":
     fetch_asos_orders()
